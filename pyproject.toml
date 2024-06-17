@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "propertyguru-scraper"
+version = "0.1.0"
+description = ""
+authors = ["zaidejaz <zaidejaz521@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+numpy = "^1.26.4"
+pandas = "^2.2.2"
+beautifulsoup4 = "^4.12.3"
+pyppeteer = "^2.0.0"
+pyppeteer-stealth = "^2.7.4"
+openpyxl = "^3.1.4"
+flask = "^3.0.3"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

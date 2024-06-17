@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <title>Property Scraper</title>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mt-5">Property Scraper</h1>
+        <form id="scrapeForm" method="post" enctype="multipart/form-data" class="mt-4">
+            <div class="form-group">
+                <label for="url">Property Search URL:</label>
+                <input type="text" class="form-control" id="url" name="url" required>
+            </div>
+            <div class="form-group">
+                <label for="file">Excel File:</label>
+                <input type="file" class="form-control-file" id="file" name="file">
+            </div>
+            <button type="submit" class="btn btn-primary">Scrape</button>
+        </form>
+        <div id="statusMessage" class="mt-4"></div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            $('#scrapeForm').on('submit', function(event) {
+                event.preventDefault();
+                var formData = new FormData(this);
+
+                $('#statusMessage').html('<div class="alert alert-info">Scraping in progress, please wait...</div>');
+
+                $.ajax({
+                    url: '/scrape',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            $('#statusMessage').html('<div class="alert alert-success">' + response.message + '</div>');
+                        } else {
+                            $('#statusMessage').html('<div class="alert alert-danger">' + response.message + '</div>');
+                        }
+                    },
+                    error: function() {
+                        $('#statusMessage').html('<div class="alert alert-danger">An error occurred during the request.</div>');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
