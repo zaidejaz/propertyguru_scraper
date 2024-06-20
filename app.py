@@ -184,7 +184,7 @@ async def extract_listing_details(url):
         "Previous Price": None,
         "Wow Change": None,
         "Size / Strata Size (sqft)": amenities["land_size"],
-        "$PSF": amenities["psf"],
+        "$PSF": amenities["psf"].replace("s",""),
         "Land Gross Floor Area (sqft)": get_text_from_label("Floor Size"),
         "Property Type": get_text_from_label("Property Type"),
         "Tenancy": get_text_from_label("Currently Tenanted"),
