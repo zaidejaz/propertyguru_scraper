@@ -21,6 +21,7 @@
             <button type="submit" class="btn btn-primary">Scrape</button>
         </form>
         <div id="statusMessage" class="mt-4"></div>
+        <div id="downloadLink" class="mt-4"></div>
     </div>
 
     <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
@@ -33,6 +34,7 @@
                 var formData = new FormData(this);
 
                 $('#statusMessage').html('<div class="alert alert-info">Scraping in progress, please wait...</div>');
+                $('#downloadLink').html('');
 
                 $.ajax({
                     url: '/scrape',
@@ -43,6 +45,7 @@
                     success: function(response) {
                         if (response.status === 'success') {
                             $('#statusMessage').html('<div class="alert alert-success">' + response.message + '</div>');
+                            $('#downloadLink').html('<a href="' + response.download_url + '" class="btn btn-success">Download Scraped Data</a>');
                         } else {
                             $('#statusMessage').html('<div class="alert alert-danger">' + response.message + '</div>');
                         }
