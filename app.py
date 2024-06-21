@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import time
 from datetime import datetime
 from flask import Flask, request, render_template, jsonify, send_file, url_for
 from werkzeug.utils import secure_filename
@@ -9,11 +10,12 @@ from pyppeteer_stealth import stealth
 from bs4 import BeautifulSoup
 import pandas as pd
 from concurrent.futures import ProcessPoolExecutor
+import os
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['SECRET_KEY'] = 'supersecretkey'
-app.config['MAX_CONTENT_PATH'] = 10000000
+app.config['MAX_CON TENT_PATH'] = 10000000
 app.config['DOWNLOAD_FOLDER'] = 'downloads'
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -59,14 +61,31 @@ def run_scraping(url, file_path):
     combined_listings_data = loop.run_until_complete(scrape_property(url))
     update_excel(combined_listings_data, file_path)
 
-async def get_page_content(url):
+async def login(page):
+    logging.info("Logging in...")
+    await page.goto('https://www.propertyguru.com.sg/', {"waitUntil": "load", "timeout": 0})
+    logging.info("Navigated to PropertyGuru homepage.")
+    await page.click('button[data-automation-id="navigation-login"]')
+    logging.info("Login Button Clicked.....")
+    # Wait for the email field to be available before typing
+    await page.waitForSelector('input[data-automation-id="email-fld"]')
+    await page.type('input[data-automation-id="email-fld"]', os.environ.get("EMAIL"))
+    logging.info("Email Entered....")
+    await page.click('button[data-automation-id="continue-btn"]')
+    logging.info("Continue")  
+    # Wait for the password field to be available before typing
+    await page.waitForSelector('input[data-automation-id="password-fld"]')
+    await page.type('input[data-automation-id="password-fld"]', os.environ.get("PASSWORD"))
+    logging.info("Password Entered.....")
+    await page.click('button[data-automation-id="submit-btn"]') 
+    logging("Hello World!")
+    logging.info("Login successful.")
+
+
+async def get_page_content(url, page):
     try:
-        browser = await launch(headless=True, args=["--no-sandbox"])
-        page = await browser.newPage()
-        await stealth(page)
         await page.goto(url, {"waitUntil": "load", "timeout": 0})
         content = await page.content()
-        await browser.close()
         return content
     except Exception as e:
         logging.error(f"Error fetching page content for URL {url}: {e}")
@@ -92,9 +111,8 @@ def parse_price(price_str):
         return float(price_str.replace('S$', '').replace(',', '').strip())
     return None
 
-
-async def extract_listing_details(url):
-    content = await get_page_content(url)
+async def extract_listing_details(url, page):
+    content = await get_page_content(url, page)
     if not content:
         return None
     soup = BeautifulSoup(content, "html.parser")
@@ -145,35 +163,27 @@ async def extract_listing_details(url):
 
     def parse_mrt_distance(mrt_text):
         if mrt_text:
-            # Split by '(' to separate distance and time
-            parts = mrt_text.split('(')
-
-            # Extract time
-            mrt_time = parts[0].strip()
-
-            # Extract distance from the second part
-            if len(parts) > 1:
-                mrt_distance = parts[1].replace(')', '').strip()
-            else:
-                mrt_distance = None
-
-            return mrt_time, mrt_distance
-
+            start_index = mrt_text.find('(')
+            end_index = mrt_text.find(')')
+            if start_index != -1 and end_index != -1:
+                mrt_time = mrt_text[:start_index].strip()
+                mrt_distance = mrt_text[start_index + 1:end_index].strip()
+                return mrt_time, mrt_distance
         return None, None
 
+    def get_agent_phone_number():
+        whatsapp_link = soup.select_one('a[data-automation-id="enquiry-widget-whatsapp-btn"]')
+        if whatsapp_link:
+            href = whatsapp_link['href']
+            phone_number = href.split('https://wa.me/')[1].split('?')[0]
+            return phone_number
+        return None
 
     agent, cea_number, agency = get_agent_details()
     labels = get_labels()
     amenities = get_amenities()
     distance_time, mrt_station = parse_mrt_distance(get_text("span.mrt-distance__text"))
-    if distance_time:
-        start_index = distance_time.find('(')
-        end_index = distance_time.find(')')
-        
-        if start_index != -1 and end_index != -1:
-            mrt_time = distance_time[:start_index].strip()
-            mrt_distance = distance_time[start_index + 1:end_index].strip()
-            return mrt_time, mrt_distance
+    mrt_time, mrt_distance = distance_time, mrt_station
 
     details = {
         "Address": get_text("span.full-address__address"),
@@ -184,7 +194,7 @@ async def extract_listing_details(url):
         "Previous Price": None,
         "Wow Change": None,
         "Size / Strata Size (sqft)": amenities["land_size"],
-        "$PSF": amenities["psf"].replace("s",""),
+        "$PSF": amenities["psf"].replace("s", ""),
         "Land Gross Floor Area (sqft)": get_text_from_label("Floor Size"),
         "Property Type": get_text_from_label("Property Type"),
         "Tenancy": get_text_from_label("Currently Tenanted"),
@@ -193,13 +203,12 @@ async def extract_listing_details(url):
         "Days in Market": None, 
         "First Listed On": get_text_from_label("Listed On"),
         "Mrt Distance": mrt_distance,
-        "Mrt Time": mrt_time,
-        "Nearest Mrt": mrt_station,
+        "Nearest Mrt": mrt_time,
         "No Of Agent Listing": 1,
         "Listing Agents Change": 0,
         "Agent's CEA Number": cea_number,
         "Agent's Name": agent,
-        "Agent's Phone Number": None,
+        "Agent's Phone Number": get_agent_phone_number(),
         "Agency": agency,
     }
 
@@ -216,77 +225,51 @@ async def extract_listing_details(url):
     return details
 
 async def scrape_property(search_url):
-    content = await get_page_content(search_url)
+    browser_options = {
+        'headless': True,
+        'args': [
+            '--start-maximized',
+            '--window-size=1920,1080' 
+        ]
+    }
+    browser = await launch(browser_options)
+    page = await browser.newPage()
+    await page.setViewport({
+        'width': 1920,
+        'height': 1080,
+    })
+    await stealth(page)
+    await login(page)
+    content = await get_page_content(search_url, page)
     listing_links = parse_listings(content)
 
     listings_data = []
     for link in listing_links:
-        details = await extract_listing_details(link)
+        details = await extract_listing_details(link, page)
         if details:
             listings_data.append(details)
 
-    combined_listings = {}
-    for listing in listings_data:
-        address = listing["Address"]
-        if address not in combined_listings:
-            combined_listings[address] = listing
-        else:
-            combined_listing = combined_listings[address]
-            combined_listing["Links"].extend(listing["Links"])
-            combined_listing["No Of Agent Listing"] = len(listing["Links"])
-            combined_listing["Wow Change"] = listing["Asking Price"] - combined_listing["Asking Price"]
-            combined_listing["Previous Price"] = combined_listing["Asking Price"]
-            combined_listing["Asking Price"] = listing["Asking Price"]
+    combined_listings_df = pd.DataFrame(listings_data)
+    output_filename = os.path.join(app.config['DOWNLOAD_FOLDER'], "scraped_data.xlsx")
+    combined_listings_df.to_excel(output_filename, index=False)
 
-    return combined_listings
+    await browser.close()
+    return combined_listings_df
 
-def update_excel(data, file_path):
-    columns = ["Address", "Listing Type", "District", "Links", "Asking Price", "Previous Price",
-               "Wow Change", "Size / Strata Size (sqft)", "$PSF", "Land Gross Floor Area (sqft)",
-               "Property Type", "Tenancy", "Bedrooms", "Bathrooms", "Days in Market", "First Listed On",
-               "Mrt Distance", "Mrt Time", "Nearest Mrt", "No Of Agent Listing", "Listing Agents Change",
-               "Agent's CEA Number", "Agent's Name", "Agent's Phone Number", "Agency"]
-
-    df_new = pd.DataFrame.from_dict(data, orient='index').reset_index(drop=True)
-
-    if file_path and os.path.exists(file_path):
-        df_existing = pd.read_excel(file_path)
-        df_existing = df_existing.applymap(lambda x: x if not pd.isna(x) else None)
+def update_excel(scraped_data, file_path):
+    if file_path:
+        existing_df = pd.read_excel(file_path)
+        for index, row in existing_df.iterrows():
+            listing_url = row["Links"]
+            matched_row = scraped_data.loc[scraped_data["Links"] == listing_url]
+            if not matched_row.empty:
+                for column in scraped_data.columns:
+                    if column in row and not pd.isnull(matched_row.iloc[0][column]):
+                        existing_df.at[index, column] = matched_row.iloc[0][column]
+        updated_filename = os.path.join(app.config['DOWNLOAD_FOLDER'], "updated_" + os.path.basename(file_path))
+        existing_df.to_excel(updated_filename, index=False)
     else:
-        df_existing = pd.DataFrame(columns=columns)
-
-    df_combined = pd.concat([df_existing, df_new]).drop_duplicates(subset=["Address"], keep="last")
-
-    # Update status: Existing or Expired
-    for index, row in df_combined.iterrows():
-        address = row["Address"]
-        existing_row = df_existing[df_existing["Address"] == address]
-        if not existing_row.empty:
-            # Update status to "Existing"
-            df_combined.at[index, "Listing Type"] = "Existing"
-            # Check if links are expired
-            existing_links = set(existing_row["Links"].values[0]) if not existing_row["Links"].isnull().values.any() else set()
-            current_links = set(row["Links"])
-            if existing_links.difference(current_links):
-                df_combined.at[index, "Listing Type"] = "Expired"
-            # Keep the original First Listed On date
-            df_combined.at[index, "First Listed On"] = existing_row["First Listed On"].values[0]
-            # Calculate Days in Market
-            listed_date = datetime.strptime(existing_row["First Listed On"].values[0], '%Y-%m-%d')
-            days_in_market = (datetime.now() - listed_date).days
-            df_combined.at[index, "Days in Market"] = days_in_market
-        else:
-            # Calculate Days in Market for new listings
-            listed_date = datetime.strptime(row["First Listed On"], '%d %b %Y')
-            days_in_market = (datetime.now() - listed_date).days
-            df_combined.at[index, "Days in Market"] = days_in_market
-
-    output_path = os.path.join(app.config['DOWNLOAD_FOLDER'], 'scraped_data.xlsx')
-    df_combined.to_excel(output_path, index=False)
+        scraped_data.to_excel(os.path.join(app.config['DOWNLOAD_FOLDER'], "scraped_data.xlsx"), index=False)
 
 if __name__ == "__main__":
-    if not os.path.exists(app.config["UPLOAD_FOLDER"]):
-        os.makedirs(app.config["UPLOAD_FOLDER"])
-    if not os.path.exists(app.config["DOWNLOAD_FOLDER"]):
-        os.makedirs(app.config["DOWNLOAD_FOLDER"])
-    app.run(debug=True, port=5002)
+    app.run(debug=True)
